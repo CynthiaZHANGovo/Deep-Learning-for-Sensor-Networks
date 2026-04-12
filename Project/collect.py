@@ -3,56 +3,22 @@ import time
 from pathlib import Path
 
 import serial
-from serial.tools import list_ports
 
+# ===== 固定参数 =====
+PORT = "COM13"
+BAUD = 115200
+DURATION = 20
 
-VALID_LABELS = ["walking", "running", "resting"]
 BASE_DIR = Path("dataset")
 
-
-def choose_port() -> str:
-    ports = list(list_ports.comports())
-
-    if not ports:
-        raise RuntimeError("No serial ports found. Please connect your Arduino and try again.")
-
-    print("Available serial ports:")
-    for i, p in enumerate(ports):
-        print(f"{i}: {p.device} - {p.description}")
-
-    while True:
-        choice = input("Select port number: ").strip()
-        try:
-            idx = int(choice)
-            if 0 <= idx < len(ports):
-                return ports[idx].device
-        except ValueError:
-            pass
-        print("Invalid selection. Please enter a valid port number.")
+KEY_TO_LABEL = {
+    "w": "walking",
+    "r": "running",
+    "s": "resting",
+}
 
 
-def choose_label() -> str:
-    print(f"Available labels: {', '.join(VALID_LABELS)}")
-    while True:
-        label = input("Enter label: ").strip().lower()
-        if label in VALID_LABELS:
-            return label
-        print("Invalid label. Please choose one of: walking, running, resting.")
-
-
-def choose_duration() -> int:
-    while True:
-        value = input("Duration (seconds): ").strip()
-        try:
-            duration = int(value)
-            if duration > 0:
-                return duration
-        except ValueError:
-            pass
-        print("Invalid duration. Please enter a positive integer.")
-
-
-def get_next_filename(label: str) -> Path:
+def get_next_filename(label):
     label_dir = BASE_DIR / label
     label_dir.mkdir(parents=True, exist_ok=True)
 
@@ -60,24 +26,22 @@ def get_next_filename(label: str) -> Path:
 
     max_index = 0
     for f in existing:
-        stem = f.stem  # e.g. walking_003
-        parts = stem.split("_")
-        if len(parts) == 2 and parts[0] == label and parts[1].isdigit():
-            max_index = max(max_index, int(parts[1]))
+        num = f.stem.split("_")[-1]
+        if num.isdigit():
+            max_index = max(max_index, int(num))
 
-    next_index = max_index + 1
-    return label_dir / f"{label}_{next_index:03d}.csv"
+    return label_dir / f"{label}_{max_index+1:03d}.csv"
 
 
-def main() -> None:
-    port = choose_port()
-    label = choose_label()
-    duration = choose_duration()
-
+def collect(ser, label):
     filename = get_next_filename(label)
 
-    ser = serial.Serial(port, 115200, timeout=1)
-    time.sleep(2)
+    print(f"\nPrepare for {label}...")
+    for i in range(3, 0, -1):
+        print(f"Starting in {i}...")
+        time.sleep(1)
+
+    print("GO!")
 
     start = time.time()
 
@@ -85,11 +49,9 @@ def main() -> None:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "ax", "ay", "az", "label"])
 
-        print(f"Collecting '{label}' for {duration} seconds on {port} ...")
-        print(f"Saving to: {filename}")
-
-        while time.time() - start < duration:
+        while time.time() - start < DURATION:
             line = ser.readline().decode(errors="ignore").strip()
+
             if not line:
                 continue
 
@@ -99,15 +61,40 @@ def main() -> None:
 
             try:
                 ax, ay, az = map(float, parts)
-            except ValueError:
+            except:
                 continue
 
             ts = time.time() - start
             writer.writerow([f"{ts:.3f}", ax, ay, az, label])
-            print(f"{ts:.2f}, {ax}, {ay}, {az}")
+
+    print(f"Done → saved: {filename}")
+
+
+def main():
+    print(f"Using port: {PORT}")
+
+    ser = serial.Serial(PORT, BAUD, timeout=1)
+    time.sleep(2)
+
+    print("\nControls:")
+    print("w = walking")
+    print("r = running")
+    print("s = resting")
+    print("q = quit")
+
+    while True:
+        key = input("\nPress key: ").strip().lower()
+
+        if key == "q":
+            print("Bye!")
+            break
+
+        if key in KEY_TO_LABEL:
+            collect(ser, KEY_TO_LABEL[key])
+        else:
+            print("Invalid key")
 
     ser.close()
-    print(f"Done. Saved to {filename}")
 
 
 if __name__ == "__main__":
