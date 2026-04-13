@@ -69,23 +69,53 @@ class AudioService {
       const <SportType, List<RemoteTrack>>{
         SportType.resting: <RemoteTrack>[
           RemoteTrack(
-            fileName: 'resting_calm_no_drums.mp3',
-            title: 'Calm No Drums',
-            url: 'https://samplelib.com/lib/preview/mp3/sample-15s.mp3',
+            fileName: 'resting_calm_piano_v2.mp3',
+            title: 'Calm Piano',
+            url: 'https://orangefreesounds.com/wp-content/uploads/2023/04/Calm-piano-background-music-free.mp3',
+          ),
+          RemoteTrack(
+            fileName: 'resting_soft_piano_v2.mp3',
+            title: 'Soft Piano Song',
+            url: 'https://www.orangefreesounds.com/wp-content/uploads/2021/06/Soft-piano-song.mp3',
+          ),
+          RemoteTrack(
+            fileName: 'resting_dreamy_ambient_v2.mp3',
+            title: 'Dreamy Ambient Music',
+            url: 'https://orangefreesounds.com/wp-content/uploads/2023/06/Dreamy-ambient-music.mp3',
           ),
         ],
         SportType.walking: <RemoteTrack>[
           RemoteTrack(
-            fileName: 'walking_flute_drums.mp3',
-            title: 'Flute and Drum Groove',
-            url: 'https://samplelib.com/lib/preview/mp3/sample-12s.mp3',
+            fileName: 'walking_uplifting_v2.mp3',
+            title: 'Uplifting Instrumental Music',
+            url: 'https://www.orangefreesounds.com/wp-content/uploads/2021/07/Uplifting-instrumental-music.mp3',
+          ),
+          RemoteTrack(
+            fileName: 'walking_groovy_day_v2.mp3',
+            title: 'Groovy Day',
+            url: 'https://www.orangefreesounds.com/wp-content/uploads/2016/12/Groovy-day-infomercial-music.mp3',
+          ),
+          RemoteTrack(
+            fileName: 'walking_motivational_v2.mp3',
+            title: 'Motivational Inspiring Music',
+            url: 'https://orangefreesounds.com/wp-content/uploads/2023/03/Motivational-inspiring-music.mp3',
           ),
         ],
         SportType.running: <RemoteTrack>[
           RemoteTrack(
-            fileName: 'running_background_drums.mp3',
-            title: 'Background Drums Drive',
-            url: 'https://samplelib.com/lib/preview/mp3/sample-9s.mp3',
+            fileName: 'running_free_electronic_v4.mp3',
+            title: 'Free Electronic Music',
+            url: 'https://orangefreesounds.com/wp-content/uploads/2023/09/Free-electronic-music.mp3',
+          ),
+          RemoteTrack(
+            fileName: 'running_free_inspirational_v3.mp3',
+            title: 'Free Inspirational Music',
+            url: 'https://orangefreesounds.com/wp-content/uploads/2023/08/Free-inspirational-music.mp3',
+          ),
+          RemoteTrack(
+            fileName: 'running_groovy_electronic_v4.mp3',
+            title: 'Groovy Electronic Background Music',
+            url: 'https://www.orangefreesounds.com/wp-content/uploads/2022/03/Groovy-electronic-background-music.mp3',
           ),
         ],
       };
@@ -94,10 +124,12 @@ class AudioService {
 
   SportType? _activeSport;
   String _currentTrackName = 'Not selected';
+  int? _currentTrackIndex;
 
   SportType? get activeSport => _activeSport;
   bool get isPlaying => _player.playing;
   String get currentTrackName => _currentTrackName;
+  int? get currentTrackIndex => _currentTrackIndex;
 
   String get currentPlaylistName {
     final sport = _activeSport;
@@ -105,14 +137,18 @@ class AudioService {
       return 'Not selected';
     }
 
-    return '${sport.playlistName} (${sport.energyLabel})';
+    return sport.playlistName;
   }
 
   String playlistLabelForSport(SportType sport) {
-    return '${sport.playlistName} (${sport.energyLabel})';
+    return sport.playlistName;
   }
 
   int get playlistCount => _remotePlaylists.length;
+
+  List<RemoteTrack> tracksForSport(SportType sport) {
+    return List<RemoteTrack>.unmodifiable(_remotePlaylists[sport] ?? const <RemoteTrack>[]);
+  }
 
   Future<Map<SportType, bool>> getDownloadStatus() async {
     final status = <SportType, bool>{};
@@ -143,6 +179,19 @@ class AudioService {
     }
 
     return true;
+  }
+
+  Future<void> clearDownloadCache() async {
+    await stop();
+
+    final rootDirectory = await getApplicationDocumentsDirectory();
+    final playlistsDirectory = Directory(
+      '${rootDirectory.path}${Platform.pathSeparator}playlists',
+    );
+
+    if (await playlistsDirectory.exists()) {
+      await playlistsDirectory.delete(recursive: true);
+    }
   }
 
   Future<void> downloadAllPlaylists({
@@ -253,8 +302,31 @@ class AudioService {
     bool autoDownload = false,
     void Function(DownloadProgress progress)? onDownloadProgress,
   }) async {
-    if (_activeSport == sport) {
+    if (_activeSport == sport && _currentTrackIndex == 0) {
       return false;
+    }
+
+    return playTrackForSport(
+      sport,
+      0,
+      autoDownload: autoDownload,
+      onDownloadProgress: onDownloadProgress,
+    );
+  }
+
+  Future<bool> playTrackForSport(
+    SportType sport,
+    int trackIndex, {
+    bool autoDownload = false,
+    void Function(DownloadProgress progress)? onDownloadProgress,
+  }) async {
+    final tracks = _remotePlaylists[sport];
+    if (tracks == null || tracks.isEmpty) {
+      throw StateError('No remote playlist configured for ${sport.value}.');
+    }
+
+    if (trackIndex < 0 || trackIndex >= tracks.length) {
+      throw RangeError.index(trackIndex, tracks, 'trackIndex');
     }
 
     if (!await isPlaylistDownloaded(sport)) {
@@ -269,7 +341,6 @@ class AudioService {
     }
 
     final directory = await _playlistDirectory(sport);
-    final tracks = _remotePlaylists[sport]!;
     final playlist = ConcatenatingAudioSource(
       useLazyPreparation: true,
       children: tracks
@@ -283,14 +354,15 @@ class AudioService {
 
     await _player.setAudioSource(
       playlist,
-      initialIndex: 0,
+      initialIndex: trackIndex,
       initialPosition: Duration.zero,
     );
     await _player.setLoopMode(LoopMode.all);
     await _player.play();
 
     _activeSport = sport;
-    _currentTrackName = tracks.first.title;
+    _currentTrackIndex = trackIndex;
+    _currentTrackName = tracks[trackIndex].title;
     return true;
   }
 
@@ -308,6 +380,7 @@ class AudioService {
     await _player.stop();
     _activeSport = null;
     _currentTrackName = 'Not selected';
+    _currentTrackIndex = null;
   }
 
   Future<void> dispose() async {

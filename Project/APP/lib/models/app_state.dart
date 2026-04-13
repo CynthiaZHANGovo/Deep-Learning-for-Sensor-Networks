@@ -47,6 +47,8 @@ class AppState extends ChangeNotifier {
   String get currentSportLabel => _detectedSport?.value ?? 'Waiting for data';
   String get currentPlaylistName => _audioService.currentPlaylistName;
   String get currentTrackName => _audioService.currentTrackName;
+  List<RemoteTrack> tracksForSport(SportType sport) => _audioService.tracksForSport(sport);
+  int? get currentTrackIndex => _audioService.currentTrackIndex;
   double get downloadProgress => _downloadProgress;
   int get downloadedPlaylistCount =>
       _downloadedPlaylists.values.where((downloaded) => downloaded).length;
@@ -164,6 +166,30 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> clearDownloadCache() async {
+    if (_isDownloading) {
+      return;
+    }
+
+    _isDownloading = true;
+    _downloadProgress = 0;
+    _downloadStatus = 'Clearing downloaded music cache...';
+    notifyListeners();
+
+    try {
+      await _audioService.clearDownloadCache();
+      _resetSportRouting();
+      await refreshDownloads();
+      _statusMessage = 'Downloaded music cache cleared.';
+    } catch (error) {
+      _downloadStatus = 'Failed to clear cache: $error';
+      _statusMessage = _downloadStatus;
+    } finally {
+      _isDownloading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> refreshDownloads() async {
     _downloadedPlaylists = await _audioService.getDownloadStatus();
 
@@ -215,6 +241,44 @@ class AppState extends ChangeNotifier {
     }
 
     await _handleSportUpdate(sport.value);
+  }
+
+  Future<void> sendMockTrack(SportType sport, int trackIndex) async {
+    if (!_isMockModeEnabled) {
+      _statusMessage = 'Enable Mock BLE first.';
+      notifyListeners();
+      return;
+    }
+
+    _detectedSport = sport;
+    _isRoutingSportChange = true;
+    notifyListeners();
+
+    try {
+      await _audioService.playTrackForSport(
+        sport,
+        trackIndex,
+        autoDownload: true,
+        onDownloadProgress: (progress) {
+          _isDownloading = true;
+          _downloadProgress = progress.progress;
+          _downloadStatus = progress.message;
+          notifyListeners();
+        },
+      );
+      _lastAcceptedSport = sport;
+      _lastPlaylistSwitchAt = DateTime.now();
+      await refreshDownloads();
+      _isDownloading = false;
+      _statusMessage = 'Mock switched to ${sport.value} track ${trackIndex + 1}.';
+    } catch (error) {
+      _isDownloading = false;
+      _statusMessage = 'Audio playback error: $error';
+    } finally {
+      _isRoutingSportChange = false;
+    }
+
+    notifyListeners();
   }
 
   Future<void> _handleSportUpdate(String rawSport) async {
