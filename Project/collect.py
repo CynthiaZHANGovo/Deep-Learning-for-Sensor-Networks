@@ -4,7 +4,7 @@ from pathlib import Path
 
 import serial
 
-# ===== 固定参数 =====
+# ===== parameters =====
 PORT = "COM13"
 BAUD = 115200
 DURATION = 20
@@ -47,7 +47,7 @@ def collect(ser, label):
 
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["timestamp", "ax", "ay", "az", "label"])
+        writer.writerow(["timestamp", "ax", "ay", "az"])
 
         while time.time() - start < DURATION:
             line = ser.readline().decode(errors="ignore").strip()
@@ -65,7 +65,7 @@ def collect(ser, label):
                 continue
 
             ts = time.time() - start
-            writer.writerow([f"{ts:.3f}", ax, ay, az, label])
+            writer.writerow([f"{ts:.3f}", ax, ay, az])
 
     print(f"Done → saved: {filename}")
 
