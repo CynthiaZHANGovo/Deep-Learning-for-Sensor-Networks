@@ -3,6 +3,10 @@
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
+    <!-- Legacy Bluetooth permissions required on Android 11 and lower -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
     <!-- BLE scan permission for Android 12+ -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <!-- BLE connect permission for Android 12+ -->

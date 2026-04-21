@@ -21,7 +21,6 @@ class AppState extends ChangeNotifier {
   StreamSubscription<bool>? _playbackSubscription;
 
   bool _isConnected = false;
-  bool _isMockModeEnabled = false;
   bool _isBusy = false;
   bool _isDownloading = false;
   bool _isRoutingSportChange = false;
@@ -35,7 +34,6 @@ class AppState extends ChangeNotifier {
   Map<SportType, bool> _downloadedPlaylists = <SportType, bool>{};
 
   bool get isConnected => _isConnected;
-  bool get isMockModeEnabled => _isMockModeEnabled;
   bool get isBusy => _isBusy;
   bool get isDownloading => _isDownloading;
   bool get isPlaying => _audioService.isPlaying;
@@ -47,8 +45,6 @@ class AppState extends ChangeNotifier {
   String get currentSportLabel => _detectedSport?.value ?? 'Waiting for data';
   String get currentPlaylistName => _audioService.currentPlaylistName;
   String get currentTrackName => _audioService.currentTrackName;
-  List<RemoteTrack> tracksForSport(SportType sport) => _audioService.tracksForSport(sport);
-  int? get currentTrackIndex => _audioService.currentTrackIndex;
   double get downloadProgress => _downloadProgress;
   int get downloadedPlaylistCount =>
       _downloadedPlaylists.values.where((downloaded) => downloaded).length;
@@ -80,12 +76,6 @@ class AppState extends ChangeNotifier {
       return;
     }
 
-    if (_isMockModeEnabled) {
-      _statusMessage = 'Turn off Mock BLE before linking the real device.';
-      notifyListeners();
-      return;
-    }
-
     await _runBusyTask(() async {
       _connectionStatus = 'Scanning';
       notifyListeners();
@@ -107,7 +97,6 @@ class AppState extends ChangeNotifier {
       await _bleService.disconnect();
       await _audioService.pause();
       _resetSportRouting();
-      _isMockModeEnabled = false;
       _connectionStatus = 'Disconnected';
       _statusMessage = 'Disconnected.';
     });
@@ -206,76 +195,6 @@ class AppState extends ChangeNotifier {
       _downloadProgress = downloadedCount / _audioService.playlistCount;
       _downloadStatus =
           '$downloadedCount of ${_audioService.playlistCount} playlists are cached.';
-    }
-
-    notifyListeners();
-  }
-
-  Future<void> setMockMode(bool enabled) async {
-    if (_isMockModeEnabled == enabled) {
-      return;
-    }
-
-    _isMockModeEnabled = enabled;
-
-    if (enabled) {
-      await _bleService.disconnect(emitStatus: false);
-      _isConnected = false;
-      _resetSportRouting();
-      _connectionStatus = 'Mock mode';
-      _statusMessage = 'Mock BLE enabled. Use the buttons below to switch sport state.';
-    } else {
-      _resetSportRouting();
-      _connectionStatus = 'Disconnected';
-      _statusMessage = 'Mock BLE disabled.';
-    }
-
-    notifyListeners();
-  }
-
-  Future<void> sendMockSport(SportType sport) async {
-    if (!_isMockModeEnabled) {
-      _statusMessage = 'Enable Mock BLE first.';
-      notifyListeners();
-      return;
-    }
-
-    await _handleSportUpdate(sport.value);
-  }
-
-  Future<void> sendMockTrack(SportType sport, int trackIndex) async {
-    if (!_isMockModeEnabled) {
-      _statusMessage = 'Enable Mock BLE first.';
-      notifyListeners();
-      return;
-    }
-
-    _detectedSport = sport;
-    _isRoutingSportChange = true;
-    notifyListeners();
-
-    try {
-      await _audioService.playTrackForSport(
-        sport,
-        trackIndex,
-        autoDownload: true,
-        onDownloadProgress: (progress) {
-          _isDownloading = true;
-          _downloadProgress = progress.progress;
-          _downloadStatus = progress.message;
-          notifyListeners();
-        },
-      );
-      _lastAcceptedSport = sport;
-      _lastPlaylistSwitchAt = DateTime.now();
-      await refreshDownloads();
-      _isDownloading = false;
-      _statusMessage = 'Mock switched to ${sport.value} track ${trackIndex + 1}.';
-    } catch (error) {
-      _isDownloading = false;
-      _statusMessage = 'Audio playback error: $error';
-    } finally {
-      _isRoutingSportChange = false;
     }
 
     notifyListeners();

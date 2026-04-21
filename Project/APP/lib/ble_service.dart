@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BleService {
   static const String targetDeviceName = 'SportMusicNano';
@@ -16,10 +18,13 @@ class BleService {
       StreamController<String>.broadcast();
   final StreamController<bool> _connectionController =
       StreamController<bool>.broadcast();
+  final StreamController<List<String>> _scanDebugController =
+      StreamController<List<String>>.broadcast();
 
   Stream<String> get statusStream => _statusController.stream;
   Stream<String> get sportStream => _sportController.stream;
   Stream<bool> get connectionStream => _connectionController.stream;
+  Stream<List<String>> get scanDebugStream => _scanDebugController.stream;
 
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _sportCharacteristic;
@@ -40,7 +45,23 @@ class BleService {
       return;
     }
 
-    final isSupported = await FlutterBluePlus.isSupported;
+    final permissionsOk = await _ensureBlePermissions();
+    if (!permissionsOk) {
+      return;
+    }
+
+    bool isSupported = false;
+    try {
+      isSupported = await FlutterBluePlus.isSupported;
+    } catch (error) {
+      _emitStatus('BLE support check failed: $error');
+      _emitScanDebug(<String>[
+        'BLE support check failed',
+        '$error',
+      ]);
+      return;
+    }
+
     if (!isSupported) {
       _emitStatus('BLE is not supported on this device.');
       return;
@@ -49,6 +70,7 @@ class BleService {
     _targetScanResult = null;
     _isScanning = true;
     _emitStatus('Scanning for $targetDeviceName...');
+    _emitScanDebug(const <String>['Scanning started...']);
 
     await _notificationSubscription?.cancel();
     await _scanSubscription?.cancel();
@@ -57,11 +79,31 @@ class BleService {
 
     _scanSubscription = FlutterBluePlus.scanResults.listen(
       (results) async {
+        final debugRows = results
+            .map((result) {
+              final advertisedName = result.advertisementData.advName.trim();
+              final platformName = result.device.platformName.trim();
+              final displayName = advertisedName.isNotEmpty
+                  ? advertisedName
+                  : (platformName.isNotEmpty ? platformName : '(no name)');
+              return '$displayName | id=${result.device.remoteId.str} | rssi=${result.rssi}';
+            })
+            .toSet()
+            .toList(growable: false);
+        _emitScanDebug(debugRows);
+
         for (final result in results) {
-          final name = result.device.platformName.trim();
-          if (name == targetDeviceName) {
+          final platformName = result.device.platformName.trim();
+          final advertisedName = result.advertisementData.advName.trim();
+          final candidateName =
+              advertisedName.isNotEmpty ? advertisedName : platformName;
+
+          if (candidateName == targetDeviceName) {
             _targetScanResult = result;
-            _emitStatus('Found $targetDeviceName. Ready to connect.');
+            _emitStatus(
+              'Found $targetDeviceName via '
+              '${advertisedName.isNotEmpty ? 'advertised name' : 'platform name'}.',
+            );
             if (!completer.isCompleted) {
               completer.complete();
             }
@@ -112,7 +154,8 @@ class BleService {
 
     final device = _targetScanResult!.device;
     _connectedDevice = device;
-    _emitStatus('Connecting to ${device.platformName}...');
+    final displayName = _resolvedDeviceName(_targetScanResult!);
+    _emitStatus('Connecting to $displayName...');
 
     try {
       await device.connect(timeout: const Duration(seconds: 10));
@@ -135,6 +178,7 @@ class BleService {
 
     try {
       final services = await device.discoverServices();
+      _emitStatus('Connected. Discovering BLE services...');
       final service = services.cast<BluetoothService?>().firstWhere(
             (candidate) => candidate?.uuid == targetServiceUuid,
             orElse: () => null,
@@ -160,6 +204,7 @@ class BleService {
 
       _sportCharacteristic = characteristic;
       await characteristic.setNotifyValue(true);
+      _emitStatus('Notifications enabled. Waiting for sport updates...');
 
       _notificationSubscription = characteristic.lastValueStream.listen(
         (value) {
@@ -213,6 +258,7 @@ class BleService {
     await _statusController.close();
     await _sportController.close();
     await _connectionController.close();
+    await _scanDebugController.close();
   }
 
   Future<void> _resetConnectionState() async {
@@ -224,5 +270,56 @@ class BleService {
     if (!_statusController.isClosed) {
       _statusController.add(message);
     }
+  }
+
+  void _emitScanDebug(List<String> rows) {
+    if (!_scanDebugController.isClosed) {
+      _scanDebugController.add(rows);
+    }
+  }
+
+  Future<bool> _ensureBlePermissions() async {
+    if (!Platform.isAndroid) {
+      return true;
+    }
+
+    final Map<String, PermissionStatus> statuses = <String, PermissionStatus>{};
+
+    Future<void> requestAndStore(String label, Permission permission) async {
+      final status = await permission.request();
+      statuses[label] = status;
+    }
+
+    await requestAndStore('bluetoothScan', Permission.bluetoothScan);
+    await requestAndStore('bluetoothConnect', Permission.bluetoothConnect);
+    await requestAndStore('locationWhenInUse', Permission.locationWhenInUse);
+
+    final debugLines = statuses.entries
+        .map((entry) => 'permission ${entry.key}: ${entry.value}')
+        .toList(growable: false);
+    _emitScanDebug(debugLines);
+
+    final allGranted = statuses.values.every((status) => status.isGranted);
+    if (!allGranted) {
+      _emitStatus('BLE permissions are missing. Check Nearby devices and Location.');
+      return false;
+    }
+
+    _emitStatus('BLE permissions granted. Starting scan...');
+    return true;
+  }
+
+  String _resolvedDeviceName(ScanResult result) {
+    final advertisedName = result.advertisementData.advName.trim();
+    if (advertisedName.isNotEmpty) {
+      return advertisedName;
+    }
+
+    final platformName = result.device.platformName.trim();
+    if (platformName.isNotEmpty) {
+      return platformName;
+    }
+
+    return result.device.remoteId.str;
   }
 }
