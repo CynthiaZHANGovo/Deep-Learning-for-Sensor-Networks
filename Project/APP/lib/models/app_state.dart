@@ -24,25 +24,25 @@ class AppState extends ChangeNotifier {
   bool _isBusy = false;
   bool _isDownloading = false;
   bool _isRoutingSportChange = false;
+  bool _isMockModeEnabled = false;
   String _connectionStatus = 'Disconnected';
   String _statusMessage = 'Ready to link SportMusicNano.';
   String _downloadStatus = 'Playlists are not downloaded yet.';
-  SportType? _detectedSport;
-  SportType? _lastAcceptedSport;
-  DateTime? _lastPlaylistSwitchAt;
+  SportType? _targetSport;
   double _downloadProgress = 0;
   Map<SportType, bool> _downloadedPlaylists = <SportType, bool>{};
 
   bool get isConnected => _isConnected;
   bool get isBusy => _isBusy;
   bool get isDownloading => _isDownloading;
+  bool get isMockModeEnabled => _isMockModeEnabled;
   bool get isPlaying => _audioService.isPlaying;
   bool get hasDiscoveredDevice => _bleService.hasDiscoveredDevice;
   bool get areAllPlaylistsDownloaded => downloadedPlaylistCount == totalPlaylistCount;
   String get connectionStatus => _connectionStatus;
   String get statusMessage => _statusMessage;
   String get downloadStatus => _downloadStatus;
-  String get currentSportLabel => _detectedSport?.value ?? 'Waiting for data';
+  String get currentSportLabel => _audioService.activeSport?.value ?? 'Waiting for data';
   String get currentPlaylistName => _audioService.currentPlaylistName;
   String get currentTrackName => _audioService.currentTrackName;
   double get downloadProgress => _downloadProgress;
@@ -56,7 +56,13 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     });
 
-    _bleSportSubscription = _bleService.sportStream.listen(_handleSportUpdate);
+    _bleSportSubscription = _bleService.sportStream.listen((rawSport) {
+      if (_isMockModeEnabled) {
+        return;
+      }
+
+      unawaited(_handleSportUpdate(rawSport));
+    });
 
     _connectionSubscription = _bleService.connectionStream.listen((connected) {
       _isConnected = connected;
@@ -95,10 +101,69 @@ class AppState extends ChangeNotifier {
   Future<void> disconnect() async {
     await _runBusyTask(() async {
       await _bleService.disconnect();
-      await _audioService.pause();
+      await _audioService.stop();
       _resetSportRouting();
       _connectionStatus = 'Disconnected';
       _statusMessage = 'Disconnected.';
+    });
+  }
+
+  Future<void> setMockMode(bool enabled) async {
+    if (_isMockModeEnabled == enabled) {
+      return;
+    }
+
+    _isMockModeEnabled = enabled;
+
+    if (enabled) {
+      await _bleService.disconnect(emitStatus: false);
+      _isConnected = false;
+      _connectionStatus = 'Disconnected';
+      _statusMessage = 'Manual control ready.';
+    } else {
+      _resetSportRouting();
+      _statusMessage = 'Ready to link SportMusicNano.';
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> sendMockSport(SportType sport) async {
+    if (!_isMockModeEnabled) {
+      return;
+    }
+
+    await _runBusyTask(() async {
+      _targetSport = null;
+      _isRoutingSportChange = true;
+      _statusMessage = 'Switching to ${sport.playlistName}...';
+      notifyListeners();
+
+      try {
+        final didSwitch = await _audioService.playPlaylistForSport(
+          sport,
+          autoDownload: true,
+          onDownloadProgress: (progress) {
+            _isDownloading = true;
+            _downloadProgress = progress.progress;
+            _downloadStatus = progress.message;
+            notifyListeners();
+          },
+        );
+
+        await refreshDownloads();
+        _isDownloading = false;
+        _statusMessage = didSwitch
+            ? 'Switched to ${sport.playlistName}.'
+            : '${sport.playlistName} is already active.';
+      } catch (error) {
+        _isDownloading = false;
+        _statusMessage = 'Audio playback error: $error';
+      } finally {
+        _isRoutingSportChange = false;
+      }
+
+      notifyListeners();
     });
   }
 
@@ -201,12 +266,6 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _handleSportUpdate(String rawSport) async {
-    if (_isRoutingSportChange) {
-      _statusMessage = 'A previous sport change is still being processed.';
-      notifyListeners();
-      return;
-    }
-
     final sport = SportType.fromRawValue(rawSport);
     if (sport == null) {
       _statusMessage = 'Ignored unknown sport value: $rawSport';
@@ -214,18 +273,11 @@ class AppState extends ChangeNotifier {
       return;
     }
 
-    _detectedSport = sport;
+    _targetSport = sport;
+    notifyListeners();
 
-    if (_lastAcceptedSport == sport) {
-      _statusMessage = 'Duplicate "$rawSport" update ignored.';
-      notifyListeners();
-      return;
-    }
-
-    final now = DateTime.now();
-    if (_lastPlaylistSwitchAt != null &&
-        now.difference(_lastPlaylistSwitchAt!) < const Duration(seconds: 3)) {
-      _statusMessage = 'Ignored "$rawSport" because playlist switching is debounced.';
+    if (_isRoutingSportChange) {
+      _statusMessage = 'Updating music to ${sport.value}...';
       notifyListeners();
       return;
     }
@@ -233,37 +285,56 @@ class AppState extends ChangeNotifier {
     _isRoutingSportChange = true;
 
     try {
-      final didSwitch = await _audioService.playPlaylistForSport(
-        sport,
-        autoDownload: true,
-        onDownloadProgress: (progress) {
-          _isDownloading = true;
-          _downloadProgress = progress.progress;
-          _downloadStatus = progress.message;
+      while (_targetSport != null) {
+        final nextSport = _targetSport!;
+        _targetSport = null;
+
+        if (_audioService.activeSport == nextSport) {
+          _statusMessage = '${nextSport.playlistName} is already active.';
           notifyListeners();
-        },
-      );
-      _lastAcceptedSport = sport;
-      _lastPlaylistSwitchAt = now;
-      await refreshDownloads();
-      _isDownloading = false;
-      _statusMessage = didSwitch
-          ? 'Switched to ${sport.playlistName}.'
-          : '${sport.playlistName} is already active.';
+          continue;
+        }
+
+        _statusMessage = 'Switching to ${nextSport.playlistName}...';
+        notifyListeners();
+
+        final didSwitch = await _audioService.playPlaylistForSport(
+          nextSport,
+          autoDownload: true,
+          onDownloadProgress: (progress) {
+            if (_targetSport != null) {
+              return;
+            }
+            _isDownloading = true;
+            _downloadProgress = progress.progress;
+            _downloadStatus = progress.message;
+            notifyListeners();
+          },
+        );
+
+        if (!didSwitch && _audioService.activeSport != nextSport) {
+          _statusMessage = 'Audio source did not switch to ${nextSport.value}.';
+          notifyListeners();
+          continue;
+        }
+
+        await refreshDownloads();
+        _isDownloading = false;
+        _statusMessage = didSwitch
+            ? 'Switched to ${nextSport.playlistName}.'
+            : '${nextSport.playlistName} is already active.';
+        notifyListeners();
+      }
     } catch (error) {
       _isDownloading = false;
       _statusMessage = 'Audio playback error: $error';
     } finally {
       _isRoutingSportChange = false;
     }
-
-    notifyListeners();
   }
 
   void _resetSportRouting() {
-    _detectedSport = null;
-    _lastAcceptedSport = null;
-    _lastPlaylistSwitchAt = null;
+    _targetSport = null;
   }
 
   Future<void> _runBusyTask(Future<void> Function() action) async {

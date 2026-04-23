@@ -206,17 +206,11 @@ class BleService {
       await characteristic.setNotifyValue(true);
       _emitStatus('Notifications enabled. Waiting for sport updates...');
 
-      _notificationSubscription = characteristic.lastValueStream.listen(
-        (value) {
-          if (value.isEmpty) {
-            return;
-          }
+      final currentValue = await characteristic.read();
+      _forwardSportValue(currentValue);
 
-          final sport = utf8.decode(value).trim();
-          if (sport.isNotEmpty) {
-            _sportController.add(sport);
-          }
-        },
+      _notificationSubscription = characteristic.onValueReceived.listen(
+        _forwardSportValue,
         onError: (Object error) {
           _emitStatus('Notification error: $error');
         },
@@ -276,6 +270,24 @@ class BleService {
     if (!_scanDebugController.isClosed) {
       _scanDebugController.add(rows);
     }
+  }
+
+  void _forwardSportValue(List<int> value) {
+    if (value.isEmpty) {
+      return;
+    }
+
+    final sport = utf8
+        .decode(value, allowMalformed: true)
+        .replaceAll('\u0000', '')
+        .trim()
+        .toLowerCase();
+    if (sport.isEmpty) {
+      return;
+    }
+
+    _emitStatus('Received sport update: $sport');
+    _sportController.add(sport);
   }
 
   Future<bool> _ensureBlePermissions() async {

@@ -56,6 +56,11 @@ class AudioService {
     _playerStateSubscription = _player.playerStateStream.listen((playerState) {
       _playbackStateController.add(playerState.playing);
     });
+    _currentIndexSubscription = _player.currentIndexStream.listen((index) {
+      _currentTrackIndex = index;
+      _syncCurrentTrackMetadata();
+      _playbackStateController.add(_player.playing);
+    });
   }
 
   final AudioPlayer _player = AudioPlayer();
@@ -64,6 +69,7 @@ class AudioService {
       StreamController<bool>.broadcast();
 
   late final StreamSubscription<PlayerState> _playerStateSubscription;
+  late final StreamSubscription<int?> _currentIndexSubscription;
 
   final Map<SportType, List<RemoteTrack>> _remotePlaylists =
       const <SportType, List<RemoteTrack>>{
@@ -358,22 +364,24 @@ class AudioService {
       initialPosition: Duration.zero,
     );
     await _player.setLoopMode(LoopMode.all);
-    await _player.play();
-
     _activeSport = sport;
     _currentTrackIndex = trackIndex;
-    _currentTrackName = tracks[trackIndex].title;
+    _syncCurrentTrackMetadata();
+    await _player.play();
+    _playbackStateController.add(_player.playing);
     return true;
   }
 
   Future<void> play() async {
     if (_player.audioSource != null) {
       await _player.play();
+      _playbackStateController.add(_player.playing);
     }
   }
 
   Future<void> pause() async {
     await _player.pause();
+    _playbackStateController.add(_player.playing);
   }
 
   Future<void> stop() async {
@@ -381,13 +389,37 @@ class AudioService {
     _activeSport = null;
     _currentTrackName = 'Not selected';
     _currentTrackIndex = null;
+    _playbackStateController.add(_player.playing);
   }
 
   Future<void> dispose() async {
     await _playerStateSubscription.cancel();
+    await _currentIndexSubscription.cancel();
     await _player.dispose();
     await _playbackStateController.close();
     _httpClient.close();
+  }
+
+  void _syncCurrentTrackMetadata() {
+    final sport = _activeSport;
+    if (sport == null) {
+      _currentTrackName = 'Not selected';
+      return;
+    }
+
+    final tracks = _remotePlaylists[sport];
+    if (tracks == null || tracks.isEmpty) {
+      _currentTrackName = 'Not selected';
+      return;
+    }
+
+    final index = _currentTrackIndex ?? 0;
+    if (index < 0 || index >= tracks.length) {
+      _currentTrackName = tracks.first.title;
+      return;
+    }
+
+    _currentTrackName = tracks[index].title;
   }
 
   Future<Directory> _playlistDirectory(SportType sport) async {

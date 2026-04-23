@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'audio_service.dart';
 import 'models/app_state.dart';
 
 class HomePage extends StatelessWidget {
@@ -178,6 +179,50 @@ class HomePage extends StatelessWidget {
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 132),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Opacity(
+                                opacity: 0.75,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        const Text('Manual'),
+                                        const SizedBox(width: 8),
+                                        Switch.adaptive(
+                                          value: state.isMockModeEnabled,
+                                          onChanged: state.isBusy ? null : state.setMockMode,
+                                        ),
+                                      ],
+                                    ),
+                                    if (state.isMockModeEnabled) ...<Widget>[
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        spacing: 10,
+                                        runSpacing: 10,
+                                        children: <Widget>[
+                                          _MockSportButton(
+                                            label: 'walking',
+                                            onTap: () => state.sendMockSport(SportType.walking),
+                                          ),
+                                          _MockSportButton(
+                                            label: 'running',
+                                            onTap: () => state.sendMockSport(SportType.running),
+                                          ),
+                                          _MockSportButton(
+                                            label: 'resting',
+                                            onTap: () => state.sendMockSport(SportType.resting),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -189,6 +234,31 @@ class HomePage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _MockSportButton extends StatelessWidget {
+  const _MockSportButton({
+    required this.label,
+    required this.onTap,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        minimumSize: const Size(0, 38),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+        ),
+      ),
+      child: Text(label),
     );
   }
 }
