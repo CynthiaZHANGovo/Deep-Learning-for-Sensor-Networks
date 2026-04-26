@@ -81,13 +81,13 @@ Adaptive Music Playback
 👉 Quick links:
 
 * 🔧 Arduino code:
-  [https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/arduino](https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/arduino)
+  [https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/Project/SportMusic](https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/Project/SportMusic)
 
 * 📱 Flutter App:
-  [https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/flutter_app](https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/flutter_app)
+  [https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/Project/APP](https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/Project/APP)
 
 * 📊 Dataset:
-  [https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/dataset](https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/dataset)
+  [https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/Project/dataset](https://github.com/CynthiaZHANGovo/Deep-Learning-for-Sensor-Networks/tree/main/Project/dataset)
 
 ---
 
